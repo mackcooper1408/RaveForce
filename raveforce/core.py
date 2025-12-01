@@ -1,23 +1,53 @@
-from wasmer import engine, Store, Module, Instance, Memory, ImportObject, Function, FunctionType, Type
+from wasmer import (
+    engine,
+    Store,
+    Module,
+    Instance,
+    Memory,
+    ImportObject,
+    Function,
+    FunctionType,
+    Type,
+)
 from wasmer_compiler_cranelift import Compiler
 from urllib.request import urlopen
 import numpy as np
 import sys
 import datetime
 import struct, random
+import gymnasium as gym
 
-def make(code="", target=[], total_step=16, step_len=0.125, criteria="raw",
-    action_space=[]):
-    return Env(code=code, target=target, total_step=total_step, step_len=step_len,
-    criteria=criteria, action_space=action_space)
-#end
+
+def make(
+    code="", target=[], total_step=16, step_len=0.125, criteria="raw", action_space=[]
+):
+    return Env(
+        code=code,
+        target=target,
+        total_step=total_step,
+        step_len=step_len,
+        criteria=criteria,
+        action_space=action_space,
+    )
+
+
+# end
+
 
 def now():
     return datetime.datetime.now()
 
-class Env(object):
-    def __init__(self, code="", target=[], total_step=16, step_len=0.125, criteria="raw",
-    action_space=[]):
+
+class Env(gym.Env):
+    def __init__(
+        self,
+        code="",
+        target=[],
+        total_step=16,
+        step_len=0.125,
+        criteria="raw",
+        action_space=[],
+    ):
         self.elapse_block = 0
         self.code = code
         self.target = target
@@ -27,7 +57,7 @@ class Env(object):
         self.action_space = ActionSpace(action_space)
         self.loaded = False
         # some calculation
-        self.para_num = code.count('{}')
+        self.para_num = code.count("{}")
 
     def reset(self, plot=False):
         # use wasmer-python
@@ -37,14 +67,13 @@ class Env(object):
             import_object = ImportObject()
             store = Store(engine.JIT(Compiler))
             import_object.register(
-                "env",
-                {
-                    "now": Function(store, now, FunctionType([], [Type.F64]))
-                }
+                "env", {"now": Function(store, now, FunctionType([], [Type.F64]))}
             )
             # self.module = Module(self.store, open('glicol_wasm.wasm', 'rb').read())
             # self.module = Module(self.store, urlopen('https://cdn.jsdelivr.net/gh/chaosprint/glicol/js/src/glicol_wasm.wasm', 'rb').read())
-            binary = urlopen('https://cdn.jsdelivr.net/gh/chaosprint/glicol@v0.11.9/js/src/glicol_wasm.wasm').read()
+            binary = urlopen(
+                "https://cdn.jsdelivr.net/gh/chaosprint/glicol@v0.11.9/js/src/glicol_wasm.wasm"
+            ).read()
             module = Module(store, binary)
             self.instance = Instance(module, import_object)
             self.loaded = True
@@ -59,7 +88,6 @@ class Env(object):
 
     def step(self, action):
 
-        
         inPtr = self.instance.exports.alloc(128)
         resultPtr = self.instance.exports.alloc_uint8array(256)
 
@@ -83,22 +111,23 @@ class Env(object):
         self.num_block = int(self.step_len * 44100 / 128)
         # self.elapse_block += self.num_block
 
-       
         # self.audio = []
 
         for _ in range(self.num_block):
 
             self.instance.exports.process(inPtr, audioBufPtr, 256, resultPtr)
-            bufuint8 = self.instance.exports.memory.uint8_view(offset=int(audioBufPtr))[:1024]
+            bufuint8 = self.instance.exports.memory.uint8_view(offset=int(audioBufPtr))[
+                :1024
+            ]
             nth = 0
             buf = []
             while nth < 1024:
-                byte_arr = bytearray(bufuint8[nth: nth+4])
-                num = struct.unpack('<f', byte_arr)
+                byte_arr = bytearray(bufuint8[nth : nth + 4])
+                num = struct.unpack("<f", byte_arr)
                 buf.append(num[0])
                 nth += 4
             result = self.instance.exports.memory.uint8_view(offset=resultPtr)
-            result_str = "".join(map(chr, filter(lambda x : x != 0, result[:256])))
+            result_str = "".join(map(chr, filter(lambda x: x != 0, result[:256])))
             # deprecated in 2022
             # self.instance.exports.process_u8(self.audioBufPtr)
             # self.memory = self.instance.exports.memory.uint8_view(self.audioBufPtr)
@@ -117,13 +146,16 @@ class Env(object):
     def render(self):
         pass
 
+    def close(self):
+        pass
+
     def padding_to_total(self):
         # pad_width = len(self.target) - len(self.audio[0])
         # print(len(self.target), len(self.audio))
         # padded = np.pad(self.audio, pad_width, "constant", constant_values=0)
         # print(padded)
         padded = np.zeros(len(self.target))
-        padded[:len(self.audio[0])] = self.audio[0]
+        padded[: len(self.audio[0])] = self.audio[0]
         return padded
 
     def calc_reward(self, padded_observation):
@@ -137,6 +169,7 @@ class Env(object):
         else:
             return 0
 
+
 class ActionSpace(object):
     def __init__(self, actions):
         self.actions = actions
@@ -147,9 +180,9 @@ class ActionSpace(object):
             if action[0] == "lin":
                 result[i] = action[1] + random.random() * (action[2] - action[1])
             elif action[0] == "exp":
-                point_a = np.log(action[1]+sys.float_info. min)
+                point_a = np.log(action[1] + sys.float_info.min)
                 point_b = np.log(action[2])
-                result[i] = np.exp(point_a + random.random()*(point_b - point_a))
+                result[i] = np.exp(point_a + random.random() * (point_b - point_a))
             elif action[0] == "rel":
                 func = action[2]
                 by = result[action[1]]
