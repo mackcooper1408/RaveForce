@@ -269,5 +269,27 @@ class Env(gym.Env):
             # Calculate L2 norm (Euclidean distance) between MFCCs
             l2_distance = np.linalg.norm(obs_mfcc - target_mfcc)
             return float(-l2_distance)
+        elif self.criteria == "stft":
+            # Short-Time Fourier Transform comparison
+            sr = 44100  # Sample rate used in the audio engine
+
+            # Compute STFT magnitude spectrograms
+            obs_stft = np.abs(librosa.stft(padded_observation))
+            target_stft = np.abs(librosa.stft(self.target))
+
+            # Calculate L2 norm between spectrograms
+            l2_distance = np.linalg.norm(obs_stft - target_stft)
+            return float(-l2_distance)
+        elif self.criteria == "cqt":
+            # Constant-Q Transform comparison
+            sr = 44100  # Sample rate used in the audio engine
+
+            # Compute CQT
+            obs_cqt = np.abs(librosa.cqt(padded_observation, sr=sr))
+            target_cqt = np.abs(librosa.cqt(self.target, sr=sr))
+
+            # Calculate L2 norm between CQT representations
+            l2_distance = np.linalg.norm(obs_cqt - target_cqt)
+            return float(-l2_distance)
         else:
             return 0.0
