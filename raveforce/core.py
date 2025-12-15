@@ -1,3 +1,15 @@
+from urllib.request import urlopen
+
+import datetime
+import random
+import struct
+import sys
+
+import gymnasium as gym
+from gymnasium import spaces
+import librosa
+import numpy as np
+import torch
 from wasmer import (
     engine,
     Store,
@@ -10,14 +22,7 @@ from wasmer import (
     Type,
 )
 from wasmer_compiler_cranelift import Compiler
-from urllib.request import urlopen
-import numpy as np
-import sys
-import datetime
-import struct, random
-import gymnasium as gym
-from gymnasium import spaces
-import librosa
+from audiobox_aesthetics.infer import initialize_predictor
 
 
 def make(
@@ -61,6 +66,11 @@ class Env(gym.Env):
         self.criteria = criteria
         self.loaded = False
         self.step_count = 0
+
+        # Initialize aesthetic predictor if needed
+        self.predictor = None
+        if self.criteria == "maa":
+            self.predictor = initialize_predictor(ckpt=None)
 
         # some calculation
         self.para_num = code.count("{}")
@@ -207,7 +217,12 @@ class Env(gym.Env):
         terminated = self.step_count >= self.total_step
         truncated = False  # Can be used for time limits or other truncation conditions
 
-        info = {"result": result_str if result_str != "" else ""}
+        # Note: result_str is for error/debug messages from WASM engine
+        # Empty result_str is normal when there are no errors
+        info = {
+            "result": result_str if result_str != "" else "",
+            "audio_samples": len(self.audio[0]),  # Debug: confirm audio is generated
+        }
 
         return padded_observation, reward, terminated, truncated, info
 
@@ -242,12 +257,18 @@ class Env(gym.Env):
         return result
 
     def padding_to_total(self):
-        pad_width = len(self.target) - len(self.audio[0])
-        padded = (
-            np.pad(self.audio[0], (0, pad_width))
-            if pad_width > 0
-            else np.array(self.audio[0][: len(self.target)])
-        )
+        # My implementation: pad or truncate to target length
+        # pad_width = len(self.target) - len(self.audio[0])
+        # padded = (
+        #     np.pad(self.audio[0], (0, pad_width))
+        #     if pad_width > 0
+        #     else np.array(self.audio[0][: len(self.target)])
+        # )
+
+        # Original implementation: pad or truncate to target length
+        padded = np.zeros(len(self.target))
+        audio_len = min(len(self.audio[0]), len(self.target))
+        padded[:audio_len] = self.audio[0][:audio_len]
         return padded
 
     def calc_reward(self, padded_observation):
@@ -291,5 +312,31 @@ class Env(gym.Env):
             # Calculate L2 norm between CQT representations
             l2_distance = np.linalg.norm(obs_cqt - target_cqt)
             return float(-l2_distance)
+        elif self.criteria == "maa":
+            # Meta Audiobox Aesthetic quality assessment
+            sr = 44100  # Sample rate used in the audio engine
+
+            # Ensure audio is at least 1 second (16000 samples at 16kHz after resampling)
+            if len(padded_observation) < 44100:
+                padded_obs = np.pad(
+                    padded_observation, (0, 44100 - len(padded_observation))
+                )
+            else:
+                padded_obs = padded_observation
+
+            # Convert to torch tensor with shape [1, num_samples]
+            audio_tensor = torch.from_numpy(padded_obs.astype(np.float32)).unsqueeze(0)
+
+            # Create batch in the format expected by audiobox_aesthetics
+            batch = [{"path": audio_tensor, "sample_rate": sr}]
+
+            # Get predictions for all 4 aesthetic axes: CE, CU, PC, PQ
+            results = self.predictor.forward(batch)
+
+            # Average all 4 aesthetic scores (higher is better)
+            # CE: Complexity, CU: Clarity, PC: Pleasantness, PQ: Quality
+            avg_score = sum(results[0].values()) / 4
+
+            return float(avg_score)
         else:
             return 0.0
