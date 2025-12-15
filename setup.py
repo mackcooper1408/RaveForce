@@ -21,7 +21,14 @@ REQUIRES_PYTHON = ">=3.6.0"
 VERSION = "0.2.4"
 
 # What packages are required for this module to be executed?
-REQUIRED = ["wasmer", "numpy", "wasmer_compiler_cranelift", "gymnasium", "librosa"]
+REQUIRED = [
+    "wasmer",
+    "numpy",
+    "wasmer_compiler_cranelift",
+    "gymnasium",
+    "librosa",
+    "audiobox_aesthetics",
+]
 
 # What packages are optional?
 EXTRAS = {
