@@ -17,6 +17,7 @@ import datetime
 import struct, random
 import gymnasium as gym
 from gymnasium import spaces
+import librosa
 
 
 def make(
@@ -123,7 +124,7 @@ class Env(gym.Env):
             # self.module = Module(self.store, open('glicol_wasm.wasm', 'rb').read())
             # self.module = Module(self.store, urlopen('https://cdn.jsdelivr.net/gh/chaosprint/glicol/js/src/glicol_wasm.wasm', 'rb').read())
             binary = urlopen(
-                "https://cdn.jsdelivr.net/gh/chaosprint/glicol@v0.11.9/js/src/glicol_wasm.wasm"
+                "https://cdn.jsdelivr.net/gh/chaosprint/glicol@latest/js/src/glicol_wasm.wasm"
             ).read()
             module = Module(store, binary)
             self.instance = Instance(module, import_object)
@@ -201,7 +202,6 @@ class Env(gym.Env):
         reward = self.calc_reward(padded_observation)
 
         self.step_count += 1
-        print("step {} in total {}".format(self.step_count, self.total_step))
 
         # Gymnasium requires separate terminated and truncated flags
         terminated = self.step_count >= self.total_step
@@ -242,12 +242,12 @@ class Env(gym.Env):
         return result
 
     def padding_to_total(self):
-        # pad_width = len(self.target) - len(self.audio[0])
-        # print(len(self.target), len(self.audio))
-        # padded = np.pad(self.audio, pad_width, "constant", constant_values=0)
-        # print(padded)
-        padded = np.zeros(len(self.target), dtype=np.float32)
-        padded[: len(self.audio[0])] = self.audio[0]
+        pad_width = len(self.target) - len(self.audio[0])
+        padded = (
+            np.pad(self.audio[0], (0, pad_width))
+            if pad_width > 0
+            else np.array(self.audio[0][: len(self.target)])
+        )
         return padded
 
     def calc_reward(self, padded_observation):
@@ -258,5 +258,16 @@ class Env(gym.Env):
             # mse = 0.1
             mse = (np.square(padded_observation - self.target)).mean(axis=0)
             return float(-mse)
+        elif self.criteria == "mfcc":
+            # Extract MFCC features from both audio signals
+            sr = 44100  # Sample rate used in the audio engine
+
+            # Extract MFCCs for observed and target audio
+            obs_mfcc = librosa.feature.mfcc(y=padded_observation, sr=sr, n_mfcc=13)
+            target_mfcc = librosa.feature.mfcc(y=self.target, sr=sr, n_mfcc=13)
+
+            # Calculate L2 norm (Euclidean distance) between MFCCs
+            l2_distance = np.linalg.norm(obs_mfcc - target_mfcc)
+            return float(-l2_distance)
         else:
             return 0.0
